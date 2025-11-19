@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mario Runner: Endless Runner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom 8-bit style font for score/messages */
+        .font-8bit {
+            font-family: 'Press Start 2P', cursive;
+            text-shadow: 2px 2px #000;
+        }
+
+        /* Main Game Container */
+        #game-container {
+            width: 100%;
+            max-width: 900px;
+            height: 300px;
+            background: linear-gradient(to bottom, #7fc1ff 75%, #e8c78c 75%); /* Sky and Ground */
+            border: 8px solid #000;
+            margin: 0 auto;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            image-rendering: pixelated; /* Ensures crisp pixel look */
+        }
+
+        /* Mario (The Runner) */
+        #mario {
+            position: absolute;
+            bottom: 0;
+            left: 50px;
+            width: 30px;
+            height: 40px;
+            background-color: #ff0000; /* Red cap/shirt */
+            border-bottom: 5px solid #0000ff; /* Blue overalls/pants */
+            z-index: 10;
+            transition: bottom 0.15s ease-out; /* Smooth vertical movement */
+        }
+
+        /* Obstacle (Pipe) */
+        .obstacle {
+            position: absolute;
+            bottom: 0;
+            width: 30px;
+            height: 40px;
+            background-color: #008000; /* Green pipe body */
+            border-top: 5px solid #00ff00; /* Lighter green top */
+            z-index: 5;
+            transition: background-color 0.1s; /* For hit effect */
+        }
+        
+        /* Game Over and Start Screens */
+        #game-message {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 640px) {
+            #game-container {
+                height: 200px; /* Shorter game area on mobile */
+                border-width: 4px;
+            }
+            #mario {
+                left: 30px;
+                width: 25px;
+                height: 35px;
+            }
+            .obstacle {
+                width: 25px;
+            }
+            .font-8bit {
+                font-size: 0.5rem; /* Smaller text on mobile */
+            }
+            .text-3xl {
+                font-size: 1.5rem;
+            }
+            .text-xl {
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-800 p-4 min-h-screen flex flex-col items-center justify-center">
+
+    <div class="w-full max-w-lg mb-4 text-white text-center">
+        <h1 class="font-8bit text-2xl mb-2">Mario Runner</h1>
+        <p class="text-sm font-semibold text-yellow-400">Use SPACEBAR or TAP the screen to jump!</p>
+    </div>
+
+    <!-- Score Board -->
+    <div class="w-full max-w-lg flex justify-between px-2 mb-2">
+        <div class="text-white font-8bit text-sm">Score: <span id="score-display">0</span></div>
+        <div class="text-white font-8bit text-sm">High Score: <span id="high-score-display">0</span></div>
+    </div>
+
+    <!-- Game Container -->
+    <div id="game-container">
+        <div id="mario"></div>
+        
+        <!-- Game State Message Overlay -->
+        <div id="game-message">
+            <h2 id="message-text" class="font-8bit text-3xl text-white mb-4">PRESS SPACE TO START</h2>
+            <p id="sub-message-text" class="font-8bit text-xl text-yellow-300">Tap screen or press spacebar</p>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const gameContainer = document.getElementById('game-container');
+        const mario = document.getElementById('mario');
+        const scoreDisplay = document.getElementById('score-display');
+        const highScoreDisplay = document.getElementById('high-score-display');
+        const gameMessage = document.getElementById('game-message');
+        const messageText = document.getElementById('message-text');
+        const subMessageText = document.getElementById('sub-message-text');
+        
+        // Game State Variables
+        let isJumping = false;
+        let isGameOver = true;
+        let score = 0;
+        let highScore = localStorage.getItem('marioRunnerHighScore') || 0;
+        let marioY = 0; // Current vertical position (0 is floor)
+        let jumpVelocity = 0;
+        const GRAVITY = 1.2;
+        const JUMP_POWER = 18;
+        let gameSpeed = 5; // Initial speed
+        let lastObstacleTime = 0;
+        let obstacleInterval = 2000; // Time between obstacles (ms)
+        let gameLoopId;
+
+        // --- Initialization and Utility Functions ---
+
+        /**
+         * Updates the UI for Mario's position.
+         */
+        function updateMarioPosition() {
+            mario.style.bottom = `${marioY}px`;
+        }
+
+        /**
+         * Initializes the game state and UI.
+         */
+        function initializeGame() {
+            isGameOver = false;
+            score = 0;
+            marioY = 0;
+            isJumping = false;
+            gameSpeed = 5;
+            lastObstacleTime = performance.now();
+            obstacleInterval = 2000;
+            
+            // Clear all existing obstacles
+            document.querySelectorAll('.obstacle').forEach(obs => obs.remove());
+
+            scoreDisplay.textContent = score;
+            highScoreDisplay.textContent = highScore;
+            gameMessage.style.display = 'none';
+
+            mario.style.backgroundColor = '#ff0000'; // Reset color
+            mario.style.bottom = '0px';
+
+            // Start the main game loop
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * Ends the game and updates high score.
+         */
+        function endGame() {
+            cancelAnimationFrame(gameLoopId);
+            isGameOver = true;
+            mario.style.backgroundColor = '#6e0000'; // Darken Mario on loss
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('marioRunnerHighScore', highScore);
+                highScoreDisplay.textContent = highScore;
+                messageText.textContent = 'NEW HIGH SCORE!';
+                subMessageText.textContent = `Score: ${score}. Press SPACE to restart.`;
+            } else {
+                messageText.textContent = 'GAME OVER';
+                subMessageText.textContent = `Score: ${score}. Press SPACE to restart.`;
+            }
+
+            gameMessage.style.display = 'flex';
+        }
+
+        // --- Core Game Logic ---
+
+        /**
+         * Handles Mario's jumping mechanic.
+         */
+        function jump() {
+            if (isGameOver) {
+                initializeGame();
+                return;
+            }
+            
+            if (!isJumping) {
+                isJumping = true;
+                jumpVelocity = JUMP_POWER;
+            }
+        }
+
+        /**
+         * Updates Mario's vertical position based on physics.
+         */
+        function updateMarioPhysics() {
+            if (isJumping) {
+                marioY += jumpVelocity;
+                jumpVelocity -= GRAVITY;
+
+                if (marioY <= 0) {
+                    marioY = 0;
+                    isJumping = false;
+                    jumpVelocity = 0;
+                }
+                updateMarioPosition();
+            }
+        }
+
+        /**
+         * Creates a new pipe obstacle.
+         */
+        function createObstacle() {
+            const obstacle = document.createElement('div');
+            obstacle.classList.add('obstacle');
+            
+            // Randomly determine obstacle height
+            const heights = [40, 60, 80]; // Small, Medium, Large pipe
+            const randomHeight = heights[Math.floor(Math.random() * heights.length)];
+            
+            obstacle.style.height = `${randomHeight}px`;
+            obstacle.style.right = '0px'; // Start off-screen right
+            gameContainer.appendChild(obstacle);
+        }
+
+        /**
+         * Moves all obstacles and checks for removal.
+         */
+        function updateObstacles(deltaTime) {
+            const obstacles = document.querySelectorAll('.obstacle');
+            const pixelsToMove = gameSpeed * (deltaTime / (1000 / 60)); // Normalize movement to 60fps
+
+            obstacles.forEach(obstacle => {
+                let currentRight = parseFloat(obstacle.style.right);
+                let newRight = currentRight + pixelsToMove;
+                obstacle.style.right = `${newRight}px`;
+
+                // Check for removal (obstacle passed left edge of container)
+                if (newRight > gameContainer.clientWidth) {
+                    obstacle.remove();
+                    score++;
+                    scoreDisplay.textContent = score;
+                }
+            });
+
+            // Increase speed every 10 points
+            if (score > 0 && score % 10 === 0 && gameSpeed < 15) {
+                gameSpeed += 0.1;
+            }
+            
+            // Decrease interval for higher difficulty
+            if (obstacleInterval > 1000 && score % 5 === 0) {
+                obstacleInterval -= 1;
+            }
+        }
+
+        /**
+         * Checks for collision between Mario and any obstacle.
+         */
+        function checkCollisions() {
+            const marioRect = mario.getBoundingClientRect();
+            
+            // Get Mario's local x, y, width, height relative to game-container
+            const containerRect = gameContainer.getBoundingClientRect();
+            const mLeft = marioRect.left - containerRect.left;
+            const mRight = mLeft + marioRect.width;
+            const mBottom = marioY;
+            const mTop = mBottom + marioRect.height;
+
+            const obstacles = document.querySelectorAll('.obstacle');
+            
+            for (const obstacle of obstacles) {
+                const obsRect = obstacle.getBoundingClientRect();
+                
+                // Get obstacle's local x, y, width, height relative to game-container
+                const oRight = containerRect.right - obsRect.right;
+                const oLeft = containerRect.right - obsRect.right + obsRect.width;
+                const oHeight = obsRect.height;
+
+                // Simple AABB collision check (left, right, top, bottom edges overlap)
+                const horizontalOverlap = mRight > (gameContainer.clientWidth - oLeft) && mLeft < (gameContainer.clientWidth - oRight);
+                const verticalOverlap = mBottom < oHeight;
+
+                if (horizontalOverlap && verticalOverlap) {
+                    endGame();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Main animation loop.
+         * @param {number} currentTime - Timestamp provided by requestAnimationFrame.
+         */
+        function gameLoop(currentTime) {
+            if (isGameOver) return;
+
+            const deltaTime = currentTime - (gameLoop.lastTime || currentTime);
+            gameLoop.lastTime = currentTime;
+
+            // 1. Mario Physics Update
+            updateMarioPhysics();
+
+            // 2. Obstacle Generation
+            if (currentTime - lastObstacleTime > obstacleInterval) {
+                createObstacle();
+                lastObstacleTime = currentTime;
+            }
+
+            // 3. Obstacle Movement
+            updateObstacles(deltaTime);
+
+            // 4. Collision Check
+            if (checkCollisions()) {
+                return; // Game ended
+            }
+
+            // Request next frame
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+        
+        // --- Event Listeners ---
+
+        // Keyboard input (Spacebar)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                jump();
+            }
+        });
+
+        // Touch/Click input (Tap the game container)
+        gameContainer.addEventListener('click', () => {
+             jump();
+        });
+
+        // Initial setup
+        highScoreDisplay.textContent = highScore;
+        
+        // Ensure the game starts in a ready state
+        gameMessage.style.display = 'flex';
+        mario.style.bottom = '0px';
+
+    </script>
+</body>
+</html>
